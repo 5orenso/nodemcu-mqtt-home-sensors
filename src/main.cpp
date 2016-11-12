@@ -50,6 +50,7 @@ const char* inTopic = MQTT_IN_TOPIC;
 WiFiClient espClient;
 PubSubClient client(espClient);
 long lastRun = millis();
+char msg[150];
 int chipId = ESP.getChipId();
 
 BME280 bme280; // SDA = D2, SCL = D1
@@ -145,8 +146,6 @@ void setup(void) {
         motion.begin();
     }
     setupWifi();
-    // pinMode(FLAME_SENSOR_PIN, INPUT);
-    // pinMode(MOTION_SENSOR_PIN, INPUT);
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
 }
@@ -156,16 +155,6 @@ void loop() {
         reconnect();
     }
     client.loop();
-
-    char msg[150];
-    float value = 0.0;
-    char temperatureValue[10];
-    char pressureValue[10];
-    char humidityValue[10];
-    char valueFlameValue[10];
-    char valueLightValue[10];
-    char waterTemperatureValue[10];
-    int valueMotion = 0;
 
     // Stuff to do as soon as possible and as often as possible.
     if (FLAME_SENSOR) {
@@ -193,6 +182,15 @@ void loop() {
     long now = millis();
     if (now - lastRun > (PUBLISH_INTERVAL * 1000)) {
         lastRun = now;
+        float value = 0.0;
+        char temperatureValue[10];
+        char pressureValue[10];
+        char humidityValue[10];
+        char valueFlameValue[10];
+        char valueLightValue[10];
+        char waterTemperatureValue[10];
+        int valueMotion = 0;
+
         if (BME280_SENSOR) {
             // Reading BME280 sensor
             float temperature = bme280.ReadTemperature();
@@ -262,7 +260,7 @@ void loop() {
             float valueLight = light.readValue();
             dtostrf(valueLight, 3, 1, valueLightValue);
             if (DEBUG) {
-                Serial.print(", Flame: "); Serial.print(valueLightValue);
+                Serial.print(", Light: "); Serial.print(valueLightValue);
             }
             // Sending to MQTT
             snprintf (msg, 150, "{ \"chipId\": %d, \"light\": %s }",
