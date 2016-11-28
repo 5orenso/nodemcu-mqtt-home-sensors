@@ -1,14 +1,3 @@
-/*
- It connects to an MQTT server then:
-  - publishes "hello world" to the topic "outTopic" every two seconds
-  - subscribes to the topic "inTopic", printing out any messages
-    it receives. NB - it assumes the received payloads are strings not binary
-  - If the first character of the topic "inTopic" is an 1, switch ON the ESP Led,
-    else switch it off
- It will reconnect to the server if the connection is lost using a blocking
- reconnect function. See the 'mqtt_reconnect_nonblocking' example for how to
- achieve the same result without blocking the main loop.
-*/
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
@@ -16,32 +5,36 @@
 #include <BME280.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include <FlameSensor.h>
-#include <LightSensor.h>
+#include <GenericAnalogSensor.h>
 #include <PirSensor.h>
+#include <SoftwareSerial.h>
 
 #define DEBUG false
 #define VERBOSE true
-
-#define DEEP_SLEEP true
+#define DEEP_SLEEP false
 
 #define BME280_SENSOR true
 #define DALLAS_TEMPERATURE_SENSOR false
 #define FLAME_SENSOR false
-#define LIGHT_SENSOR true
+#define LIGHT_SENSOR false
+#define GAS_MQ2_SENSOR true
 #define MOTION_SENSOR false
+#define CO2_SENSOR true
 
 #define PUBLISH_INTERVAL 15
-#define SLEEP_DELAY_IN_SECONDS 120
+#define SLEEP_DELAY_IN_SECONDS 60
 #define ONE_WIRE_BUS 2  // DS18B20 on arduino pin2 corresponds to D4 on physical board
 #define FLAME_SENSOR_PIN A0
 #define LIGHT_SENSOR_PIN A0
-#define MOTION_SENSOR_PIN D6
+#define GAS_MQ2_SENSOR_PIN A0
+#define MOTION_SENSOR_PIN D5
+#define MH_Z19_RX D7
+#define MH_Z19_TX D8
 
-const char* ssid = WIFI_SSID;
-const char* password = WIFI_PASSWORD;
+const char *ssid = WIFI_SSID;
+const char *password = WIFI_PASSWORD;
 
-const char* mqtt_server = MQTT_SERVER;
+const char *mqtt_server = MQTT_SERVER;
 const int   mqtt_port = MQTT_PORT;
 
 const char* outTopic = MQTT_OUT_TOPIC;
@@ -50,17 +43,28 @@ const char* inTopic = MQTT_IN_TOPIC;
 WiFiClient espClient;
 PubSubClient client(espClient);
 long lastRun = millis();
-char msg[150];
-int chipId = ESP.getChipId();
+
+int nodemcuChipId = ESP.getChipId(); // returns the ESP8266 chip ID as a 32-bit integer.
+// ESP.getResetReason() returns String containing the last reset resaon in human readable format.
+int nodemcuFreeHeapSize = ESP.getFreeHeap(); // returns the free heap size.
+// Several APIs may be used to get flash chip info:
+int nodemcuFlashChipId = ESP.getFlashChipId(); // returns the flash chip ID as a 32-bit integer.
+int nodemcuFlashChipSize = ESP.getFlashChipSize(); // returns the flash chip size, in bytes, as seen by the SDK (may be less than actual size).
+// int nodemcuFlashChipSpeed = ESP.getFlashChipSpeed(void); // returns the flash chip frequency, in Hz.
+int nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycle count since start as an unsigned 32-bit. This is useful for accurate timing of very short actions like bit banging.
+//
+// WiFi.macAddress(mac) is for STA, WiFi.softAPmacAddress(mac) is for AP.
+// int nodemcuIP; // = WiFi.localIP(); // is for STA, WiFi.softAPIP() is for AP.
 
 BME280 bme280; // SDA = D2, SCL = D1
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
-
-FlameSensor flame = FlameSensor(FLAME_SENSOR_PIN, 20, false);
-LightSensor light = LightSensor(LIGHT_SENSOR_PIN, 20, false);
+GenericAnalogSensor flame = GenericAnalogSensor(FLAME_SENSOR_PIN, 20, false);
+GenericAnalogSensor light = GenericAnalogSensor(LIGHT_SENSOR_PIN, 20, false);
+GenericAnalogSensor gasMq2 = GenericAnalogSensor(GAS_MQ2_SENSOR_PIN, 20, false);
 PirSensor motion = PirSensor(MOTION_SENSOR_PIN, 2, false, false);
+SoftwareSerial co2Serial(MH_Z19_RX, MH_Z19_TX, false, 256); // define MH-Z19
 
 void setupWifi() {
     delay(10);
@@ -70,14 +74,11 @@ void setupWifi() {
     Serial.println(ssid);
 
     WiFi.begin(ssid, password);
-
     while (WiFi.status() != WL_CONNECTED) {
         Serial.print("."); Serial.print(ssid);
         delay(500);
     }
-
     randomSeed(micros());
-
     Serial.println("");
     Serial.println("WiFi connected");
     Serial.println("IP address: ");
@@ -92,13 +93,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
         Serial.print((char)payload[i]);
     }
     Serial.println();
-
-    // Switch on the LED if an 1 was received as first character
     if ((char)payload[0] == '1') {
         // it is acive low on the ESP-01)
-    } else { }
-}
+    } else {
 
+    }
+}
 
 void reconnect() {
     // Loop until we're reconnected
@@ -111,8 +111,6 @@ void reconnect() {
         if (client.connect(clientId.c_str())) {
             Serial.println("connected");
             // Once connected, publish an announcement...
-            // client.publish(outTopic, "{ \"chipId\": chipId, \"ping\": \"hello world\" }");
-            // ... and resubscribe
             client.subscribe(inTopic);
         } else {
             Serial.print("failed, rc=");
@@ -124,15 +122,72 @@ void reconnect() {
     }
 }
 
-static void setupBME280Sensor(void) {
+void setupBME280Sensor(void) {
     if (!bme280.begin()) {
         Serial.println("Could not find a valid BME280 sensor, check wiring!");
     }
 }
 
+int readCO2() {
+    // long ppm;
+    // const byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
+    // char response[9];
+    // co2Serial.write(cmd,9);
+    // co2Serial.readBytes(response, 9);
+    // int responseHigh = (int) response[2];
+    // int responseLow = (int) response[3];
+    // ppm = (256*responseHigh)+responseLow;
+    // return ppm;
+
+    const byte cmd[9] = {0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79}; // command to ask for data
+    unsigned char response[9]; // for answer
+    // Send command
+    co2Serial.write(cmd, 9);
+    memset(response, 0, 9);
+    co2Serial.readBytes(response, 9);
+    int i;
+    byte crc = 0;
+    for (i = 1; i < 8; i++) {
+        crc+=response[i];
+    }
+    crc = 255 - crc;
+    crc++;
+
+    if ( !(response[0] == 0xFF && response[1] == 0x86 && response[8] == crc) ) {
+        Serial.println("CRC error: " + String(crc) + " / "+ String(response[8] ));
+        co2Serial.flush();
+        return -1;
+    } else {
+        unsigned int responseHigh = (unsigned int) response[2];
+        unsigned int responseLow = (unsigned int) response[3];
+        unsigned int ppm = (256 * responseHigh) + responseLow;
+        return ppm;
+    }
+}
+
+bool publishMqttMessage(float value, char const *key, int length, int decimal) {
+    // dtostrf(temperature, 3, 2, temperatureValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
+    nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycle count since start as an unsigned 32-bit. This is useful for accurate timing of very short actions like bit banging.
+    char msg[150];
+    char textValue[10];
+    dtostrf(value, length, decimal, textValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
+    // snprintf(msg, 150, "{ \"chipId\": %d, \"freeHeapSize\": %d, \"flashChipSize\": %d, \"cycleCount\": %d, \"%s\": %s }", nodemcuChipId, nodemcuFreeHeapSize, nodemcuFlashChipSize, nodemcuCycleCount, key, textValue);
+    snprintf(msg, 150, "{ \"chipId\": %d, \"flashChipId\": %d, \"%s\": %s }", nodemcuChipId, nodemcuFlashChipId, key, textValue);
+    if (VERBOSE) {
+        Serial.print("Publish message: "); Serial.println(msg);
+    }
+    client.publish(outTopic, msg);
+    return true;
+}
+
 void setup(void) {
     Serial.begin(115200);
-    setupBME280Sensor(); // Setup BME280 sensor
+    setupWifi();
+    client.setServer(mqtt_server, mqtt_port);
+    client.setCallback(callback);
+    if (BME280_SENSOR) {
+        setupBME280Sensor(); // Setup BME280 sensor
+    }
     if (DALLAS_TEMPERATURE_SENSOR) {
         DS18B20.begin();  // Init DallasTemperature sensor
     }
@@ -142,12 +197,18 @@ void setup(void) {
     if (LIGHT_SENSOR) {
         light.begin();
     }
+    if (GAS_MQ2_SENSOR) {
+        gasMq2.begin();
+    }
     if (MOTION_SENSOR) {
         motion.begin();
     }
-    setupWifi();
-    client.setServer(mqtt_server, mqtt_port);
-    client.setCallback(callback);
+    if (CO2_SENSOR) {
+        // pinMode(MH_Z19_RX, INPUT);
+        // pinMode(MH_Z19_TX, OUTPUT);
+        co2Serial.begin(9600); //Init sensor MH-Z19
+        // co2.begin();
+    }
 }
 
 void loop() {
@@ -163,112 +224,63 @@ void loop() {
     if (LIGHT_SENSOR) {
         light.sampleValue();
     }
+    if (GAS_MQ2_SENSOR) {
+        gasMq2.sampleValue();
+    }
     if (MOTION_SENSOR) {
         int motionStateChange = motion.sampleValue();
         if (motionStateChange >= 0) {
-            if (DEBUG) {
-                Serial.print(" --> motionStateChange: "); Serial.println(motionStateChange);
-            }
-            // dtostrf(temperature, 3, 2, temperatureValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
-            snprintf(msg, 150, "{ \"chipId\": %d, \"motion\": %d }", chipId, motionStateChange);
-            if (VERBOSE) {
-                Serial.print("Publish message: "); Serial.println(msg);
-            }
-            client.publish(outTopic, msg);
+            publishMqttMessage(motionStateChange, "motion", 2, 0);
         }
+    }
+    if (CO2_SENSOR) {
+        // co2.sampleValue();
     }
 
     // Stuff to do at given time intervals.
     long now = millis();
     if (now - lastRun > (PUBLISH_INTERVAL * 1000)) {
         lastRun = now;
-        float value = 0.0;
-        char temperatureValue[10];
-        char pressureValue[10];
-        char humidityValue[10];
-        char valueFlameValue[10];
-        char valueLightValue[10];
-        char waterTemperatureValue[10];
-        int valueMotion = 0;
 
         if (BME280_SENSOR) {
             // Reading BME280 sensor
             float temperature = bme280.ReadTemperature();
-            dtostrf(temperature, 3, 2, temperatureValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
+            publishMqttMessage(temperature, "temperature", 3, 2);
+            // dtostrf(temperature, 3, 2, temperatureValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
             float pressure = bme280.ReadPressure() / 100;
-            dtostrf(pressure, 4, 1, pressureValue);
+            publishMqttMessage(pressure, "pressure", 4, 1);
+            // dtostrf(pressure, 4, 1, pressureValue);
             float humidity = bme280.ReadHumidity();
-            dtostrf(humidity, 3, 0, humidityValue);
-            if (DEBUG) {
-                Serial.print(", Air temperature:"); Serial.print(temperatureValue); Serial.print(" C");
-                Serial.print(", Air pressure:"); Serial.print(pressureValue); Serial.print(" hPa");
-                Serial.print(", Air humidity:"); Serial.print(humidityValue); Serial.print(" %");
-            }
-            // Sending to MQTT
-            snprintf (msg, 150, "{ \"chipId\": %d, \"temperature\": %s, \"pressure\": %s, \"humidity\": %s }",
-                chipId, temperatureValue, pressureValue, humidityValue);
-            if (VERBOSE) {
-                Serial.print("Publish message: "); Serial.println(msg);
-            }
-            client.publish(outTopic, msg);
+            publishMqttMessage(humidity, "humidity", 3, 1);
         }
-
         if (DALLAS_TEMPERATURE_SENSOR) {
             // Reading DallasTemperature sensor. This is kind of slow.
             // Takes about 1 second to get something from this sensor.
             DS18B20.requestTemperatures();
             float waterTemperature = DS18B20.getTempCByIndex(0);
-            dtostrf(waterTemperature, 3, 1, waterTemperatureValue);
-            if (DEBUG) {
-                Serial.print(", Water temp:"); Serial.print(waterTemperatureValue); Serial.print(" C");
-            }
-        } else {
-            dtostrf(0, 3, 1, waterTemperatureValue);
+            publishMqttMessage(waterTemperature, "waterTemp", 3, 1);
         }
         if (FLAME_SENSOR) {
-            // Reading flame sensor.
             float valueFlame = flame.readValue();
-            dtostrf(valueFlame, 3, 1, valueFlameValue);
-            if (DEBUG) {
-                Serial.print(", Flame: "); Serial.print(valueFlameValue);
-            }
-        } else {
-            dtostrf(0, 3, 1, valueFlameValue);
+            publishMqttMessage(valueFlame, "flame", 3, 1);
+
         }
-        if (MOTION_SENSOR) {
-            // Reading PIR (motion) sensor
-            valueMotion = round(motion.readValue());
-            if (DEBUG) {
-                Serial.print(", Motion: "); Serial.print(valueMotion);
-            }
+        if (LIGHT_SENSOR) {
+            float valueLight = light.readValue();
+            publishMqttMessage(valueLight, "light", 3, 1);
         }
-        // Send to MQTT
-        // TODO: Maybe split up the different sensors into own sendings?
-        if ((DALLAS_TEMPERATURE_SENSOR || FLAME_SENSOR || MOTION_SENSOR)) {
-            // Sending to MQTT
-            snprintf (msg, 150, "{ \"chipId\": %d, \"waterTemp\": %s, \"flame\": %s, \"motion\": %d }",
-                chipId, waterTemperatureValue, valueFlameValue, valueMotion);
-            if (VERBOSE) {
-                Serial.print("Publish message: "); Serial.println(msg);
-            }
-            client.publish(outTopic, msg);
+        if (GAS_MQ2_SENSOR) {
+            float valueGasMq2 = gasMq2.readValue();
+            publishMqttMessage(valueGasMq2, "GasMq2", 3, 1);
         }
 
         // Other setup
-        if (LIGHT_SENSOR) {
-            // Reading flame sensor.
-            float valueLight = light.readValue();
-            dtostrf(valueLight, 3, 1, valueLightValue);
-            if (DEBUG) {
-                Serial.print(", Light: "); Serial.print(valueLightValue);
+        if (CO2_SENSOR) {
+            float valueCo2 = readCO2();
+            // float valueCo2 = co2.readValue();
+            if (valueCo2 > 0) {
+                publishMqttMessage(valueCo2, "co2", 4, 1);
             }
-            // Sending to MQTT
-            snprintf (msg, 150, "{ \"chipId\": %d, \"light\": %s }",
-                chipId, valueLightValue);
-            if (VERBOSE) {
-                Serial.print("Publish message: "); Serial.println(msg);
-            }
-            client.publish(outTopic, msg);
         }
 
         if (DEEP_SLEEP) {
