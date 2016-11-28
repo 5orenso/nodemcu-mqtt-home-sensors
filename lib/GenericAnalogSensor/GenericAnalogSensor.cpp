@@ -1,5 +1,5 @@
 #include <GenericAnalogSensor.h>
-#include <Math.h>
+// #include <Math.h>
 
 #if ARDUINO >= 100
 #include "Arduino.h"
