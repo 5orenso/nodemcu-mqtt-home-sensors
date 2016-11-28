@@ -29,8 +29,8 @@
 #define LIGHT_SENSOR_PIN A0
 #define GAS_MQ2_SENSOR_PIN A0
 #define MOTION_SENSOR_PIN D5
-#define MH_Z19_RX D7
-#define MH_Z19_TX D8
+#define CO2_MH_Z19_RX D7
+#define CO2_MH_Z19_TX D8
 
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
@@ -63,7 +63,7 @@ GenericAnalogSensor flame = GenericAnalogSensor(FLAME_SENSOR_PIN, 20, false);
 GenericAnalogSensor light = GenericAnalogSensor(LIGHT_SENSOR_PIN, 20, false);
 GenericAnalogSensor gasMq2 = GenericAnalogSensor(GAS_MQ2_SENSOR_PIN, 20, false);
 PirSensor motion = PirSensor(MOTION_SENSOR_PIN, 2, false, false);
-Co2SensorMHZ19 co2 = Co2SensorMHZ19(MH_Z19_RX, MH_Z19_TX, 20, false);
+Co2SensorMHZ19 co2 = Co2SensorMHZ19(CO2_MH_Z19_RX, CO2_MH_Z19_TX, 20, false);
 
 void setupWifi() {
     delay(10);
