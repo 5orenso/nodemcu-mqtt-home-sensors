@@ -1,5 +1,10 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
+
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+
 #include <PubSubClient.h>
 #include <Bme280Sensor.h>
 #include <OneWire.h>
@@ -72,6 +77,9 @@ void setupWifi() {
     Serial.print("Connecting to ");
     Serial.println(ssid);
 
+    // OTA wifi setting
+    WiFi.mode(WIFI_STA);
+
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
         Serial.print("."); Serial.print(ssid);
@@ -79,8 +87,49 @@ void setupWifi() {
     }
     randomSeed(micros());
     Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
+
+    // OTA start
+    // Port defaults to 8266
+    // ArduinoOTA.setPort(8266);
+
+    // Hostname defaults to esp8266-[ChipID]
+    // ArduinoOTA.setHostname("myesp8266");
+
+    // No authentication by default
+    // ArduinoOTA.setPassword("admin");
+
+    // Password can be set with it's md5 value as well
+    // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
+    // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
+
+    ArduinoOTA.onStart([]() {
+        String type;
+        if (ArduinoOTA.getCommand() == U_FLASH) {
+            type = "sketch";
+        } else { // U_SPIFFS
+            type = "filesystem";
+        }
+        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+        Serial.println("Start updating " + type);
+    });
+    ArduinoOTA.onEnd([]() {
+        Serial.println("\nEnd");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+        else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+    ArduinoOTA.begin();
+    // OTA end
+
+    Serial.println("WiFi connected and the IP Address is:");
     Serial.println(WiFi.localIP());
 }
 
@@ -168,6 +217,9 @@ void loop() {
     }
     client.loop();
 
+    // Listen for OTA requests
+    ArduinoOTA.handle();
+
     // Stuff to do as soon as possible and as often as possible.
     if (BME280_SENSOR) {
         bme280.sampleValue();
@@ -195,7 +247,6 @@ void loop() {
     long now = millis();
     if (now - lastRun > (PUBLISH_INTERVAL * 1000)) {
         lastRun = now;
-
         if (BME280_SENSOR) {
             float temperature = bme280.readValueTemperature();
             publishMqttMessage(temperature, "temperature", 3, 2);
@@ -214,7 +265,6 @@ void loop() {
         if (FLAME_SENSOR) {
             float valueFlame = flame.readValue();
             publishMqttMessage(valueFlame, "flame", 3, 1);
-
         }
         if (LIGHT_SENSOR) {
             float valueLight = light.readValue();
