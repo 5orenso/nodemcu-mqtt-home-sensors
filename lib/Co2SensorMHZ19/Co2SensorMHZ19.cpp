@@ -3,9 +3,9 @@
 #include <SoftwareSerial.h>
 #include <Arduino.h>
 
-// using namespace std;
+using namespace std;
 
-Co2SensorMHZ19::Co2SensorMHZ19(uint8_t sensorRxPin, uint8_t sensorTxPin, int samplesCount, bool debugSetting) : co2Serial(SoftwareSerial(sensorRxPin, sensorTxPin)) {
+Co2SensorMHZ19::Co2SensorMHZ19(uint8_t sensorRxPin, uint8_t sensorTxPin, int samplesCount, bool debugSetting) : co2Serial(SoftwareSerial(sensorRxPin, sensorTxPin, false, 256)) {
     debug = debugSetting;
     sampleIndex = 0;
     lastSample = 0;
@@ -17,14 +17,12 @@ Co2SensorMHZ19::Co2SensorMHZ19(uint8_t sensorRxPin, uint8_t sensorTxPin, int sam
 
 bool Co2SensorMHZ19::begin() {
     co2Serial.begin(9600); //Init sensor MH-Z19
-    // pinMode(rxPin, INPUT);
-    // pinMode(txPin, OUTPUT);
 }
 
 float Co2SensorMHZ19::sampleValue() {
     long now = millis();
-    // Don't sample more often than every 50 millisecond.
-    if (now - lastSample > 50) {
+    // Don't sample more often than every 200 millisecond.
+    if (now - lastSample > 200) {
         lastSample = now;
         // Read co2 data
         byte cmd[9] = {0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79}; // command to ask for data
@@ -37,13 +35,14 @@ float Co2SensorMHZ19::sampleValue() {
         int i;
         byte crc = 0;
         for (i = 1; i < 8; i++) {
-            crc+=response[i];
+            crc += response[i];
         }
         crc = 255 - crc;
         crc++;
 
-        if ( !(response[0] == 0xFF && response[1] == 0x86 && response[8] == crc) ) {
+        if (!(response[0] == 0xFF && response[1] == 0x86 && response[8] == crc)) {
             Serial.println("CRC error: " + String(crc) + " / "+ String(response[8] ));
+            co2Serial.flush();
             return -1;
         } else {
             unsigned int responseHigh = (unsigned int) response[2];
@@ -53,9 +52,6 @@ float Co2SensorMHZ19::sampleValue() {
         // /Read co2 data
 
         samples[sampleIndex] = ppm;
-        // if (debug) {
-        //     Serial.print(" -->"); Serial.print(sampleIndex); Serial.print(": "); Serial.println(samples[sampleIndex]);
-        // }
         sampleIndex++;
         if (sampleIndex >= samplesTotal) {
             sampleIndex = 0;
@@ -69,18 +65,11 @@ float Co2SensorMHZ19::readValue() {
     average = 0;
     int valuesCount = 0;
     for (int i = 0; i < samplesTotal; i++) {
-        // if (debug) {
-        //     Serial.print("  -->"); Serial.print(i); Serial.print(": "); Serial.println(samples[i]);
-        // }
         if (samples[i] > 0.00) {
             valuesCount++;
             average += samples[i];
         }
     }
-    // if (debug) {
-    //     Serial.print(" ==>"); Serial.println(average);
-    // }
     average = (float)average / (float)valuesCount;
-
     return average;
 }
