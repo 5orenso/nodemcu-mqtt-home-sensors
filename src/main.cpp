@@ -1,8 +1,7 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include <Wire.h>
-#include <BME280.h>
+#include <Bme280Sensor.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <GenericAnalogSensor.h>
@@ -23,6 +22,8 @@
 
 #define PUBLISH_INTERVAL 15
 #define SLEEP_DELAY_IN_SECONDS 60
+#define BME280_SDA D2
+#define BME280_SCL D1
 #define ONE_WIRE_BUS 2  // DS18B20 on arduino pin2 corresponds to D4 on physical board
 #define FLAME_SENSOR_PIN A0
 #define LIGHT_SENSOR_PIN A0
@@ -55,9 +56,9 @@ int nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycl
 // WiFi.macAddress(mac) is for STA, WiFi.softAPmacAddress(mac) is for AP.
 // int nodemcuIP; // = WiFi.localIP(); // is for STA, WiFi.softAPIP() is for AP.
 
-BME280 bme280; // SDA = D2, SCL = D1
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
+Bme280Sensor bme280 = Bme280Sensor(BME280_SDA, BME280_SCL, 20, false);
 GenericAnalogSensor flame = GenericAnalogSensor(FLAME_SENSOR_PIN, 20, false);
 GenericAnalogSensor light = GenericAnalogSensor(LIGHT_SENSOR_PIN, 20, false);
 GenericAnalogSensor gasMq2 = GenericAnalogSensor(GAS_MQ2_SENSOR_PIN, 20, false);
@@ -120,12 +121,6 @@ void reconnect() {
     }
 }
 
-void setupBME280Sensor(void) {
-    if (!bme280.begin()) {
-        Serial.println("Could not find a valid BME280 sensor, check wiring!");
-    }
-}
-
 bool publishMqttMessage(float value, char const *key, int length, int decimal) {
     char msg[150];
     char textValue[10];
@@ -145,7 +140,7 @@ void setup(void) {
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
     if (BME280_SENSOR) {
-        setupBME280Sensor(); // Setup BME280 sensor
+        bme280.begin();
     }
     if (DALLAS_TEMPERATURE_SENSOR) {
         DS18B20.begin();  // Init DallasTemperature sensor
@@ -174,6 +169,9 @@ void loop() {
     client.loop();
 
     // Stuff to do as soon as possible and as often as possible.
+    if (BME280_SENSOR) {
+        bme280.sampleValue();
+    }
     if (FLAME_SENSOR) {
         flame.sampleValue();
     }
@@ -199,11 +197,11 @@ void loop() {
         lastRun = now;
 
         if (BME280_SENSOR) {
-            float temperature = bme280.ReadTemperature();
+            float temperature = bme280.readValueTemperature();
             publishMqttMessage(temperature, "temperature", 3, 2);
-            float pressure = bme280.ReadPressure() / 100;
+            float pressure = bme280.readValuePressure();
             publishMqttMessage(pressure, "pressure", 4, 1);
-            float humidity = bme280.ReadHumidity();
+            float humidity = bme280.readValueHumidity();
             publishMqttMessage(humidity, "humidity", 3, 1);
         }
         if (DALLAS_TEMPERATURE_SENSOR) {
