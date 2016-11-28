@@ -1,5 +1,5 @@
 #include <Co2SensorMHZ19.h>
-#include <Math.h>
+// #include <Math.h>
 #include <SoftwareSerial.h>
 #include <Arduino.h>
 
@@ -41,7 +41,7 @@ float Co2SensorMHZ19::sampleValue() {
         crc++;
 
         if (!(response[0] == 0xFF && response[1] == 0x86 && response[8] == crc)) {
-            Serial.println("CRC error: " + String(crc) + " / "+ String(response[8] ));
+            // Serial.println("CRC error: " + String(crc) + " / "+ String(response[8] ));
             co2Serial.flush();
             return -1;
         } else {
