@@ -26,6 +26,7 @@ $ cp ./platformio-dist.ini platformio.ini
 $ pio lib install PubSubClient
 $ pio lib install OneWire
 $ pio lib install DallasTemperature
+$ pio lib install EspSoftwareSerial
 ```
 
 Edit `platformio.ini` with your credentials and other settings.
