@@ -7,7 +7,7 @@
 #include <DallasTemperature.h>
 #include <GenericAnalogSensor.h>
 #include <PirSensor.h>
-#include <SoftwareSerial.h>
+#include <Co2SensorMHZ19.h>
 
 #define DEBUG false
 #define VERBOSE true
@@ -52,19 +52,17 @@ int nodemcuFlashChipId = ESP.getFlashChipId(); // returns the flash chip ID as a
 int nodemcuFlashChipSize = ESP.getFlashChipSize(); // returns the flash chip size, in bytes, as seen by the SDK (may be less than actual size).
 // int nodemcuFlashChipSpeed = ESP.getFlashChipSpeed(void); // returns the flash chip frequency, in Hz.
 int nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycle count since start as an unsigned 32-bit. This is useful for accurate timing of very short actions like bit banging.
-//
 // WiFi.macAddress(mac) is for STA, WiFi.softAPmacAddress(mac) is for AP.
 // int nodemcuIP; // = WiFi.localIP(); // is for STA, WiFi.softAPIP() is for AP.
 
 BME280 bme280; // SDA = D2, SCL = D1
-
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
 GenericAnalogSensor flame = GenericAnalogSensor(FLAME_SENSOR_PIN, 20, false);
 GenericAnalogSensor light = GenericAnalogSensor(LIGHT_SENSOR_PIN, 20, false);
 GenericAnalogSensor gasMq2 = GenericAnalogSensor(GAS_MQ2_SENSOR_PIN, 20, false);
 PirSensor motion = PirSensor(MOTION_SENSOR_PIN, 2, false, false);
-SoftwareSerial co2Serial(MH_Z19_RX, MH_Z19_TX, false, 256); // define MH-Z19
+Co2SensorMHZ19 co2 = Co2SensorMHZ19(MH_Z19_RX, MH_Z19_TX, 20, false);
 
 void setupWifi() {
     delay(10);
@@ -128,46 +126,7 @@ void setupBME280Sensor(void) {
     }
 }
 
-int readCO2() {
-    // long ppm;
-    // const byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
-    // char response[9];
-    // co2Serial.write(cmd,9);
-    // co2Serial.readBytes(response, 9);
-    // int responseHigh = (int) response[2];
-    // int responseLow = (int) response[3];
-    // ppm = (256*responseHigh)+responseLow;
-    // return ppm;
-
-    const byte cmd[9] = {0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79}; // command to ask for data
-    unsigned char response[9]; // for answer
-    // Send command
-    co2Serial.write(cmd, 9);
-    memset(response, 0, 9);
-    co2Serial.readBytes(response, 9);
-    int i;
-    byte crc = 0;
-    for (i = 1; i < 8; i++) {
-        crc+=response[i];
-    }
-    crc = 255 - crc;
-    crc++;
-
-    if ( !(response[0] == 0xFF && response[1] == 0x86 && response[8] == crc) ) {
-        Serial.println("CRC error: " + String(crc) + " / "+ String(response[8] ));
-        co2Serial.flush();
-        return -1;
-    } else {
-        unsigned int responseHigh = (unsigned int) response[2];
-        unsigned int responseLow = (unsigned int) response[3];
-        unsigned int ppm = (256 * responseHigh) + responseLow;
-        return ppm;
-    }
-}
-
 bool publishMqttMessage(float value, char const *key, int length, int decimal) {
-    // dtostrf(temperature, 3, 2, temperatureValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
-    nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycle count since start as an unsigned 32-bit. This is useful for accurate timing of very short actions like bit banging.
     char msg[150];
     char textValue[10];
     dtostrf(value, length, decimal, textValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
@@ -204,10 +163,7 @@ void setup(void) {
         motion.begin();
     }
     if (CO2_SENSOR) {
-        // pinMode(MH_Z19_RX, INPUT);
-        // pinMode(MH_Z19_TX, OUTPUT);
-        co2Serial.begin(9600); //Init sensor MH-Z19
-        // co2.begin();
+        co2.begin();
     }
 }
 
@@ -234,7 +190,7 @@ void loop() {
         }
     }
     if (CO2_SENSOR) {
-        // co2.sampleValue();
+        co2.sampleValue();
     }
 
     // Stuff to do at given time intervals.
@@ -243,19 +199,16 @@ void loop() {
         lastRun = now;
 
         if (BME280_SENSOR) {
-            // Reading BME280 sensor
             float temperature = bme280.ReadTemperature();
             publishMqttMessage(temperature, "temperature", 3, 2);
-            // dtostrf(temperature, 3, 2, temperatureValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
             float pressure = bme280.ReadPressure() / 100;
             publishMqttMessage(pressure, "pressure", 4, 1);
-            // dtostrf(pressure, 4, 1, pressureValue);
             float humidity = bme280.ReadHumidity();
             publishMqttMessage(humidity, "humidity", 3, 1);
         }
         if (DALLAS_TEMPERATURE_SENSOR) {
-            // Reading DallasTemperature sensor. This is kind of slow.
-            // Takes about 1 second to get something from this sensor.
+            // NOTE: Reading DallasTemperature sensor. This is kind of slow.
+            //       Takes about 1 second to get something from this sensor.
             DS18B20.requestTemperatures();
             float waterTemperature = DS18B20.getTempCByIndex(0);
             publishMqttMessage(waterTemperature, "waterTemp", 3, 1);
@@ -271,13 +224,12 @@ void loop() {
         }
         if (GAS_MQ2_SENSOR) {
             float valueGasMq2 = gasMq2.readValue();
-            publishMqttMessage(valueGasMq2, "GasMq2", 3, 1);
+            if (valueGasMq2 > 0) {
+                publishMqttMessage(valueGasMq2, "GasMq2", 3, 1);
+            }
         }
-
-        // Other setup
         if (CO2_SENSOR) {
-            float valueCo2 = readCO2();
-            // float valueCo2 = co2.readValue();
+            float valueCo2 = co2.readValue();
             if (valueCo2 > 0) {
                 publishMqttMessage(valueCo2, "co2", 4, 1);
             }
