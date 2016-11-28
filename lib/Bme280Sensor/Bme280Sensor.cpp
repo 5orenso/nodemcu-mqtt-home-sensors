@@ -20,6 +20,7 @@ Bme280Sensor::Bme280Sensor(uint8_t sdaPinInput, uint8_t sclPinInput, int samples
 }
 
 bool Bme280Sensor::begin() {
+    // TODO: bme280.begin(sdaPin, sclPin) should work, but I'm having some problems with it.
     if (!bme280.begin()) {
         Serial.println("Could not find a valid BME280 sensor, check wiring!");
     }
