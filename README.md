@@ -34,6 +34,13 @@ Edit `platformio.ini` with your credentials and other settings.
 Upload and run your code:
 ```bash
 $ pio run -e nodemcuv2 -t upload && pio serialports monitor -b 115200
+$ pio run -e d1_mini -t upload && pio serialports monitor -b 115200
+```
+
+Over The Air updates:
+```bash
+$ pio run -e nodemcuv2 -t upload --upload-port 192.168.1.6 && pio serialports monitor -b 115200
+$ pio run -e d1_mini -t upload --upload-port 192.168.1.6 && pio serialports monitor -b 115200
 ```
 
 Weee :-)
