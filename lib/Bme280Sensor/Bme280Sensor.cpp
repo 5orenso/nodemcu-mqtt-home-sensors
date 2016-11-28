@@ -1,7 +1,7 @@
 #include <Bme280Sensor.h>
 #include <Wire.h>
 #include <BME280.h>
-#include <Math.h>
+// #include <Math.h>
 #include <Arduino.h>
 
 using namespace std;
@@ -15,6 +15,7 @@ Bme280Sensor::Bme280Sensor(uint8_t sdaPinInput, uint8_t sclPinInput, int samples
     samplesTemperature = new float[samplesCount];
     samplesPressure = new float[samplesCount];
     samplesHumidity = new float[samplesCount];
+    // samplesDewPoint = new float[samplesCount];
     sdaPin = sdaPinInput;
     sclPin = sclPinInput;
 }
@@ -22,8 +23,9 @@ Bme280Sensor::Bme280Sensor(uint8_t sdaPinInput, uint8_t sclPinInput, int samples
 bool Bme280Sensor::begin() {
     // TODO: bme280.begin(sdaPin, sclPin) should work, but I'm having some problems with it.
     if (!bme280.begin()) {
-        Serial.println("Could not find a valid BME280 sensor, check wiring!");
+        return false;
     }
+    return true;
 }
 
 float Bme280Sensor::sampleValue() {
@@ -35,10 +37,12 @@ float Bme280Sensor::sampleValue() {
         float temperature = bme280.ReadTemperature();
         float pressure = bme280.ReadPressure() / 100;
         float humidity = bme280.ReadHumidity();
+        // float dewPoint = bme280.CalculateDewPoint(true);
 
         samplesTemperature[sampleIndex] = temperature;
         samplesPressure[sampleIndex] = pressure;
         samplesHumidity[sampleIndex] = humidity;
+        // samplesDewPoint[sampleIndex] = dewPoint;
 
         sampleIndex++;
         if (sampleIndex >= samplesTotal) {

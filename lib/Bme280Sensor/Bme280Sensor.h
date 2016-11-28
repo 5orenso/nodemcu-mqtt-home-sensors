@@ -16,6 +16,7 @@ class Bme280Sensor {
         *samplesTemperature,
         *samplesPressure,
         *samplesHumidity;
+        // *samplesDewPoint;
     uint8_t
         sdaPin,
         sclPin;
