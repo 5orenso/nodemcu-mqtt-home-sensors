@@ -49,17 +49,7 @@ const char* inTopic = MQTT_IN_TOPIC;
 WiFiClient espClient;
 PubSubClient client(espClient);
 long lastRun = millis();
-
 int nodemcuChipId = ESP.getChipId(); // returns the ESP8266 chip ID as a 32-bit integer.
-// ESP.getResetReason() returns String containing the last reset resaon in human readable format.
-int nodemcuFreeHeapSize = ESP.getFreeHeap(); // returns the free heap size.
-// Several APIs may be used to get flash chip info:
-int nodemcuFlashChipId = ESP.getFlashChipId(); // returns the flash chip ID as a 32-bit integer.
-int nodemcuFlashChipSize = ESP.getFlashChipSize(); // returns the flash chip size, in bytes, as seen by the SDK (may be less than actual size).
-// int nodemcuFlashChipSpeed = ESP.getFlashChipSpeed(void); // returns the flash chip frequency, in Hz.
-int nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycle count since start as an unsigned 32-bit. This is useful for accurate timing of very short actions like bit banging.
-// WiFi.macAddress(mac) is for STA, WiFi.softAPmacAddress(mac) is for AP.
-// int nodemcuIP; // = WiFi.localIP(); // is for STA, WiFi.softAPIP() is for AP.
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
@@ -72,6 +62,7 @@ Co2SensorMHZ19 co2 = Co2SensorMHZ19(CO2_MH_Z19_RX, CO2_MH_Z19_TX, 20, false);
 
 void setupWifi() {
     delay(10);
+    WiFi.disconnect();
     // We start by connecting to a WiFi network
     Serial.println();
     Serial.print("Connecting to ");
@@ -148,8 +139,41 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 }
 
-void reconnect() {
-    // Loop until we're reconnected
+void sendControllerInfo() {
+    if (client.connected()) {
+        // --[ Publish this device to AWS IoT ]----------------------------------------
+        // String nodemcuResetReason = ESP.getResetReason(); // returns String containing the last reset resaon in human readable format.
+        int nodemcuFreeHeapSize = ESP.getFreeHeap(); // returns the free heap size.
+        // Several APIs may be used to get flash chip info:
+        int nodemcuFlashChipId = ESP.getFlashChipId(); // returns the flash chip ID as a 32-bit integer.
+        int nodemcuFlashChipSize = ESP.getFlashChipSize(); // returns the flash chip size, in bytes, as seen by the SDK (may be less than actual size).
+        // int nodemcuFlashChipSpeed = ESP.getFlashChipSpeed(void); // returns the flash chip frequency, in Hz.
+        // int nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycle count since start as an unsigned 32-bit. This is useful for accurate timing of very short actions like bit banging.
+        // WiFi.macAddress(mac) is for STA, WiFi.softAPmacAddress(mac) is for AP.
+        // int nodemcuIP; // = WiFi.localIP(); // is for STA, WiFi.softAPIP() is for AP.
+        char msg[150];
+        uint32 ipAddress;
+        char ipAddressFinal[16];
+        ipAddress = WiFi.localIP();
+        if (ipAddress) {
+            const int NBYTES = 4;
+            uint8 octet[NBYTES];
+            for(int i = 0 ; i < NBYTES ; i++) {
+                octet[i] = ipAddress >> (i * 8);
+            }
+            sprintf(ipAddressFinal, "%d.%d.%d.%d", octet[0], octet[1], octet[2], octet[3]);
+        }
+        snprintf(msg, 150, "{ \"chipId\": %d, \"freeHeap\": %d, \"ip\": \"%s\", \"ssid\": \"%s\" }",
+            nodemcuChipId, nodemcuFreeHeapSize, ipAddressFinal, ssid
+        );
+        if (VERBOSE) {
+            Serial.print("Publish message: "); Serial.println(msg);
+        }
+        client.publish(outTopic, msg);
+    }
+}
+
+void reconnectMqtt() {
     while (!client.connected()) {
         Serial.print("Attempting MQTT connection...");
         // Create a random client ID
@@ -160,6 +184,7 @@ void reconnect() {
             Serial.println("connected");
             // Once connected, publish an announcement...
             client.subscribe(inTopic);
+            sendControllerInfo();
         } else {
             Serial.print("failed, rc=");
             Serial.print(client.state());
@@ -175,7 +200,7 @@ bool publishMqttMessage(float value, char const *key, int length, int decimal) {
     char textValue[10];
     dtostrf(value, length, decimal, textValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
     // snprintf(msg, 150, "{ \"chipId\": %d, \"freeHeapSize\": %d, \"flashChipSize\": %d, \"cycleCount\": %d, \"%s\": %s }", nodemcuChipId, nodemcuFreeHeapSize, nodemcuFlashChipSize, nodemcuCycleCount, key, textValue);
-    snprintf(msg, 150, "{ \"chipId\": %d, \"flashChipId\": %d, \"%s\": %s }", nodemcuChipId, nodemcuFlashChipId, key, textValue);
+    snprintf(msg, 150, "{ \"chipId\": %d, \"%s\": %s }", nodemcuChipId, key, textValue);
     if (VERBOSE) {
         Serial.print("Publish message: "); Serial.println(msg);
     }
@@ -212,8 +237,12 @@ void setup(void) {
 }
 
 void loop() {
+    if (WiFi.status() != WL_CONNECTED) {
+        setupWifi();
+        return;
+    }
     if (!client.connected()) {
-        reconnect();
+        reconnectMqtt();
     }
     client.loop();
 
