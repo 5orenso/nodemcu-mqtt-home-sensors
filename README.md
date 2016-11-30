@@ -17,9 +17,10 @@ __This is work in progress. I've just uploaded my CRUD project files for now. Pl
 ![All home sensors sketch](img/fritzing-home-sensor-all-sketch-v2.jpg)
 
 * Hook up your BME280 sensor: `SDA` = `D2` and `SCL` = `D1`.
-* Hook up your light (or flame) sensor: `A0`.
+* Hook up your light (or flame or gas MQ2) sensor: `A0`.
 * Hook up your PIR sensor: `D6`.
 * Hook up your DS18b20 sensor: `D4`.
+* Hook up your MH-Z19 CO2 sensor: `RX` = `D7` and `TX` = `D8`
 * Run a couple of commands:
 ```bash
 $ cp ./platformio-dist.ini platformio.ini
