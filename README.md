@@ -28,7 +28,17 @@ $ pio lib install PubSubClient
 $ pio lib install OneWire
 $ pio lib install DallasTemperature
 $ pio lib install EspSoftwareSerial
+
+# My own libraries from Platformio.org:
+$ pio lib install Co2SensorMHZ19
+$ pio lib install GenericAnalogSensor
+$ pio lib install MqttUtil
+$ pio lib install PirSensor
+$ pio lib install SwitchSensor
 ```
+
+All custom libraries can be found in this repo: https://github.com/5orenso/arduino-libs
+
 
 Edit `platformio.ini` with your credentials and other settings.
 
@@ -59,7 +69,7 @@ Weee :-)
 * [NodeMCU code for DallasTemperature sensor integrated with AWS IoT](https://github.com/5orenso/nodemcu-mqtt-dallastemperature)
 * [Arduino code for Neopixel animations](https://github.com/5orenso/nodemcu-neopixel-animations)
 * [AMI for MQTT Broker](https://github.com/5orenso/aws-ami-creation)
-
+* [All PlatforIO.org libs by Sorenso](http://platformio.org/lib/search?query=author%253A%2522Sorenso%2522)
 
 ## Contribute
 
