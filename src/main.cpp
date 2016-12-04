@@ -5,6 +5,7 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 
+#include <MqttUtil.h>
 #include <PubSubClient.h>
 #include <Bme280Sensor.h>
 #include <OneWire.h>
@@ -13,7 +14,7 @@
 #include <PirSensor.h>
 #include <Co2SensorMHZ19.h>
 
-const char* PACKAGE_NAME = "nodemcu-mqtt-home-sensors";
+const char* PACKAGE_NAME = "nodemcu_mqtt_home_sensors";
 
 #define DEBUG false
 #define VERBOSE true
@@ -37,7 +38,7 @@ const char* PACKAGE_NAME = "nodemcu-mqtt-home-sensors";
 #define GAS_MQ2_SENSOR_PIN A0
 #define MOTION_SENSOR_PIN D5
 #define CO2_MH_Z19_RX D7
-#define CO2_MH_Z19_TX D8
+#define CO2_MH_Z19_TX D6
 
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
@@ -57,6 +58,8 @@ PubSubClient client(espClient);
 long lastRun = millis();
 int nodemcuChipId = ESP.getChipId(); // returns the ESP8266 chip ID as a 32-bit integer.
 
+MqttUtil mqttUtil = MqttUtil(nodemcuChipId, PACKAGE_NAME, ssid, inTopic, outTopic, false);
+
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
 Bme280Sensor bme280 = Bme280Sensor(BME280_SDA, BME280_SCL, 20, false);
@@ -68,11 +71,7 @@ Co2SensorMHZ19 co2 = Co2SensorMHZ19(CO2_MH_Z19_RX, CO2_MH_Z19_TX, 20, false);
 
 void setupWifi() {
     delay(10);
-    WiFi.disconnect();
-    // We start by connecting to a WiFi network
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
+    Serial.print("Connecting to "); Serial.println(ssid);
 
     // OTA wifi setting
     WiFi.mode(WIFI_STA);
@@ -83,9 +82,7 @@ void setupWifi() {
         delay(500);
     }
     randomSeed(micros());
-    Serial.println("");
-    Serial.println("WiFi connected and the IP Address is:");
-    Serial.println(WiFi.localIP());
+    Serial.println(""); Serial.print("WiFi connected with IP: "); Serial.println(WiFi.localIP());
 }
 
 void setupOTA() {
@@ -146,100 +143,20 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 }
 
-void sendControllerInfo() {
-    if (client.connected()) {
-        // --[ Publish this device to AWS IoT ]----------------------------------------
-        String nodemcuResetReason = ESP.getResetReason(); // returns String containing the last reset resaon in human readable format.
-        int nodemcuFreeHeapSize = ESP.getFreeHeap(); // returns the free heap size.
-        // Several APIs may be used to get flash chip info:
-        int nodemcuFlashChipId = ESP.getFlashChipId(); // returns the flash chip ID as a 32-bit integer.
-        int nodemcuFlashChipSize = ESP.getFlashChipSize(); // returns the flash chip size, in bytes, as seen by the SDK (may be less than actual size).
-        // int nodemcuFlashChipSpeed = ESP.getFlashChipSpeed(void); // returns the flash chip frequency, in Hz.
-        // int nodemcuCycleCount = ESP.getCycleCount(); // returns the cpu instruction cycle count since start as an unsigned 32-bit. This is useful for accurate timing of very short actions like bit banging.
-        // WiFi.macAddress(mac) is for STA, WiFi.softAPmacAddress(mac) is for AP.
-        // int nodemcuIP; // = WiFi.localIP(); // is for STA, WiFi.softAPIP() is for AP.
-
-        char msg[150];
-        char resetReason[25];
-        strcpy(resetReason, nodemcuResetReason.c_str());
-        uint32 ipAddress;
-        char ipAddressFinal[16];
-        ipAddress = WiFi.localIP();
-        if (ipAddress) {
-            const int NBYTES = 4;
-            uint8 octet[NBYTES];
-            for(int i = 0 ; i < NBYTES ; i++) {
-                octet[i] = ipAddress >> (i * 8);
-            }
-            sprintf(ipAddressFinal, "%d.%d.%d.%d", octet[0], octet[1], octet[2], octet[3]);
-        }
-        snprintf(msg, 150, "{ \"chipId\": %d, \"freeHeap\": %d, \"ip\": \"%s\", \"ssid\": \"%s\" }",
-            nodemcuChipId, nodemcuFreeHeapSize, ipAddressFinal, ssid
-        );
-        if (VERBOSE) {
-            Serial.print("Publish message: "); Serial.println(msg);
-        }
-        client.publish(outTopic, msg);
-
-        // More info about the software.
-        snprintf(msg, 150, "{ \"chipId\": %d, \"ip\": \"%s\", \"sw\": \"%s\" }",
-            nodemcuChipId, ipAddressFinal, PACKAGE_NAME
-        );
-        if (VERBOSE) {
-            Serial.print("Publish message: "); Serial.println(msg);
-        }
-        client.publish(outTopic, msg);
-
-        // More info about the software.
-        // 0 -> normal startup by power on
-        // 1 -> hardware watch dog reset
-        // 2 -> software watch dog reset (From an exception)
-        // 3 -> software watch dog reset system_restart (Possibly unfed wd got angry)
-        // 4 -> soft restart (Possibly with a restart command)
-        // 5 -> wake up from deep-sleep
-        snprintf(msg, 150, "{ \"chipId\": %d, \"wifiOfflinePeriode\": %d, \"resetReason\": \"%s\" }",
-            nodemcuChipId, wifiDisconnectedPeriode, resetReason
-        );
-        if (VERBOSE) {
-            Serial.print("Publish message: "); Serial.println(msg);
-        }
-        client.publish(outTopic, msg);
-    }
-}
-
-void reconnectMqtt() {
+void reconnectMqtt(uint32 ipAddress, long wifiDisconnectedPeriode) {
     while (!client.connected()) {
-        Serial.print("Attempting MQTT connection...");
-        // Create a random client ID
         String clientId = "ESP8266Client-";
         clientId += String(random(0xffff), HEX);
-        // Attempt to connect
+        Serial.print("Attempting MQTT connection: ["); Serial.print(clientId); Serial.print("] : ");
         if (client.connect(clientId.c_str())) {
-            Serial.println("connected");
-            // Once connected, publish an announcement...
+            Serial.println("Connected to MQTT!");
             client.subscribe(inTopic);
-            sendControllerInfo();
+            mqttUtil.sendControllerInfo(client, ipAddress, wifiDisconnectedPeriode);
         } else {
-            Serial.print("failed, rc=");
-            Serial.print(client.state());
-            Serial.println(" try again in 5 seconds");
-            // Wait 5 seconds before retrying
+            Serial.print("failed, rc="); Serial.print(client.state()); Serial.println(" try again in 5 seconds...");
             delay(5000);
         }
     }
-}
-
-bool publishMqttMessage(float value, char const *key, int length, int decimal) {
-    char msg[150];
-    char textValue[10];
-    dtostrf(value, length, decimal, textValue); // first 2 is the width including the . (1.) and the 2nd 2 is the precision (.23)
-    // snprintf(msg, 150, "{ \"chipId\": %d, \"freeHeapSize\": %d, \"flashChipSize\": %d, \"cycleCount\": %d, \"%s\": %s }", nodemcuChipId, nodemcuFreeHeapSize, nodemcuFlashChipSize, nodemcuCycleCount, key, textValue);
-    snprintf(msg, 150, "{ \"chipId\": %d, \"%s\": %s }", nodemcuChipId, key, textValue);
-    if (VERBOSE) {
-        Serial.print("Publish message: "); Serial.println(msg);
-    }
-    client.publish(outTopic, msg);
-    return true;
 }
 
 void setup(void) {
@@ -247,8 +164,7 @@ void setup(void) {
     gotIpEventHandler = WiFi.onStationModeGotIP([](const WiFiEventStationModeGotIP& event) {
         wifiConnected = true;
         wifiDisconnectedPeriode = millis() - wifiDisconnectedPeriodeStart;
-        Serial.print("Station connected, IP: ");
-        Serial.println(WiFi.localIP());
+        Serial.print("Station connected, IP: "); Serial.println(WiFi.localIP());
     });
     disconnectedEventHandler = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& event) {
         wifiConnected = false;
@@ -290,7 +206,7 @@ void loop() {
         return;
     }
     if (!client.connected()) {
-        reconnectMqtt();
+        reconnectMqtt(WiFi.localIP(), wifiDisconnectedPeriode);
     }
     client.loop();
 
@@ -313,7 +229,7 @@ void loop() {
     if (MOTION_SENSOR) {
         int motionStateChange = motion.sampleValue();
         if (motionStateChange >= 0) {
-            publishMqttMessage(motionStateChange, "motion", 2, 0);
+            mqttUtil.publishKeyValueInt(client, "motion", motionStateChange);
         }
     }
     if (CO2_SENSOR) {
@@ -326,37 +242,40 @@ void loop() {
         lastRun = now;
         if (BME280_SENSOR) {
             float temperature = bme280.readValueTemperature();
-            publishMqttMessage(temperature, "temperature", 3, 2);
             float pressure = bme280.readValuePressure();
-            publishMqttMessage(pressure, "pressure", 4, 1);
             float humidity = bme280.readValueHumidity();
-            publishMqttMessage(humidity, "humidity", 3, 1);
+            mqttUtil.publishKeyValueFloat(client, "temperature", temperature, "pressure", pressure, "humidity", humidity, 4, 1);
         }
         if (DALLAS_TEMPERATURE_SENSOR) {
             // NOTE: Reading DallasTemperature sensor. This is kind of slow.
             //       Takes about 1 second to get something from this sensor.
             DS18B20.requestTemperatures();
             float waterTemperature = DS18B20.getTempCByIndex(0);
-            publishMqttMessage(waterTemperature, "waterTemp", 3, 1);
+            // publishMqttMessage(waterTemperature, "waterTemp", 3, 1);
+            mqttUtil.publishKeyValueFloat(client, "waterTemp", waterTemperature, 3, 1);
         }
         if (FLAME_SENSOR) {
             float valueFlame = flame.readValue();
-            publishMqttMessage(valueFlame, "flame", 3, 1);
+            // publishMqttMessage(valueFlame, "flame", 3, 1);
+            mqttUtil.publishKeyValueFloat(client, "flame", valueFlame, 3, 1);
         }
         if (LIGHT_SENSOR) {
             float valueLight = light.readValue();
-            publishMqttMessage(valueLight, "light", 3, 1);
+            // publishMqttMessage(valueLight, "light", 3, 1);
+            mqttUtil.publishKeyValueFloat(client, "light", valueLight, 3, 1);
         }
         if (GAS_MQ2_SENSOR) {
             float valueGasMq2 = gasMq2.readValue();
             if (valueGasMq2 > 0) {
-                publishMqttMessage(valueGasMq2, "GasMq2", 3, 1);
+                // publishMqttMessage(valueGasMq2, "GasMq2", 3, 1);
+                mqttUtil.publishKeyValueFloat(client, "GasMq2", valueGasMq2, 3, 1);
             }
         }
         if (CO2_SENSOR) {
             float valueCo2 = co2.readValue();
             if (valueCo2 > 0) {
-                publishMqttMessage(valueCo2, "co2", 4, 1);
+                // publishMqttMessage(valueCo2, "co2", 4, 1);
+                mqttUtil.publishKeyValueFloat(client, "co2", valueCo2, 4, 1);
             }
         }
 
