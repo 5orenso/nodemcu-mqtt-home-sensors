@@ -49,36 +49,8 @@ $ pio run -e nodemcuv2 -t upload --upload-port 192.168.1.6 && pio serialports mo
 $ pio run -e d1_mini -t upload --upload-port 192.168.1.6 && pio serialports monitor -b 115200
 ```
 
-Or just build the .bin and move it to your webserver updates:
+Or just monitor your ESP8266
 ```bash
-$ pio run -e nodemcuv2
-$ cp .pio/build/nodemcuv2/firmware.bin ./versions/4398831.bin
-
-# Make version file for new device:
-$ cp ./versions/4398831.version ./versions/4395765.version
-$ cp ./versions/4398831.version ./versions/964698.version
-$ cp ./versions/4398831.version ./versions/14754688.version
-
-# Add firmware version:
-# BME 280:
-$ pio run -e nodemcuv2 \
-    && cp .pio/build/nodemcuv2/firmware.bin ./versions/4398831.bin \
-    && cp .pio/build/nodemcuv2/firmware.bin ./versions/4395765.bin \
-    && cp .pio/build/nodemcuv2/firmware.bin ./versions/964698.bin \
-    && aws s3 sync ./versions/ s3://litt.no-esp8266-fota/esp8266/fota/
-
-# BME280, light:
-$ pio run -e nodemcuv2 \
-    && cp .pio/build/nodemcuv2/firmware.bin ./versions/14758780.bin \
-    && aws s3 sync ./versions/ s3://litt.no-esp8266-fota/esp8266/fota/
-
-# BME280, MQ3, DSM501A - PUBLISH_INTERVAL = 20 sec:
-$ pio run -e nodemcuv2 \
-    && cp .pio/build/nodemcuv2/firmware.bin ./versions/14754688.bin \
-    && aws s3 sync ./versions/ s3://litt.no-esp8266-fota/esp8266/fota/
-
-
-
 $ pio serialports monitor -b 115200
 ```
 
