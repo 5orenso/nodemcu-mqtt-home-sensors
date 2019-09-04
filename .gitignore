@@ -29,3 +29,7 @@
 .piolibdeps
 platformio.ini
 .DS_Store
+.pio/
+versions/
+output/
+*.bin
